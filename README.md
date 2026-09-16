@@ -47,7 +47,8 @@ Use the install control in the address bar.
 
 ## Notes
 
-- Username and password never leave this device. A PBKDF2 key unlocks an AES-GCM vault in `localStorage`.
-- Change both under SYSTEMS → IDENTITY.
-- There is no recovery. WIPE DECK destroys the vault on this device.
+- Username and password stay in the browser. A master key is wrapped with PBKDF2 + AES-GCM.
+- Forgot password: Restore access + the restore key shown at first login.
+- Change username/password or issue a new restore key under SYSTEMS.
+- WIPE DECK destroys the vault on this device.
 - EXPORT writes a JSON file of modules. Keep it private.

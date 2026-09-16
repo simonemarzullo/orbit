@@ -2,6 +2,9 @@
   "use strict";
 
   const VAULT_KEY = "orbit.vault.v1";
+  const KDF_ITERS = 210000;
+  const FAIL_MAX = 6;
+  const FAIL_MS = 30000;
   const enc = new TextEncoder();
   const dec = new TextDecoder();
 
@@ -11,18 +14,23 @@
   const state = {
     view: "boot",
     panel: "deck",
-    key: null,
+    master: null,
+    wrap: null,
+    recoveryWrap: null,
     username: "",
     modules: [],
     query: "",
     channel: "ALL",
     activeId: null,
-    installEvent: null
+    installEvent: null,
+    pendingRecovery: null
   };
 
   let clockTimer = 0;
   let toastTimer = 0;
   let dialogResolver = null;
+  let failCount = 0;
+  let failUntil = 0;
 
   /* ── crypto ─────────────────────────────────────────────── */
 
@@ -40,10 +48,10 @@
     return out;
   }
 
-  async function deriveKey(pass, salt) {
-    const base = await crypto.subtle.importKey("raw", enc.encode(pass), "PBKDF2", false, ["deriveKey"]);
+  async function deriveKey(secret, salt, iters = KDF_ITERS) {
+    const base = await crypto.subtle.importKey("raw", enc.encode(secret), "PBKDF2", false, ["deriveKey"]);
     return crypto.subtle.deriveKey(
-      { name: "PBKDF2", salt, iterations: 120000, hash: "SHA-256" },
+      { name: "PBKDF2", salt, iterations: iters, hash: "SHA-256" },
       base,
       { name: "AES-GCM", length: 256 },
       false,
@@ -51,17 +59,22 @@
     );
   }
 
-  async function encryptPayload(key, data) {
+  async function encryptBytes(key, bytes) {
     const iv = crypto.getRandomValues(new Uint8Array(12));
-    const cipher = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, enc.encode(JSON.stringify(data)));
-    return { iv: bufToB64(iv), data: bufToB64(cipher) };
+    const data = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, bytes);
+    return { iv: bufToB64(iv), data: bufToB64(data) };
+  }
+
+  async function decryptBytes(key, blob) {
+    return crypto.subtle.decrypt({ name: "AES-GCM", iv: b64ToBuf(blob.iv) }, key, b64ToBuf(blob.data));
+  }
+
+  async function encryptPayload(key, data) {
+    return encryptBytes(key, enc.encode(JSON.stringify(data)));
   }
 
   async function decryptPayload(key, payload) {
-    const iv = b64ToBuf(payload.iv);
-    const data = b64ToBuf(payload.data);
-    const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, data);
-    return JSON.parse(dec.decode(plain));
+    return JSON.parse(dec.decode(await decryptBytes(key, payload)));
   }
 
   function readVault() {
@@ -81,40 +94,138 @@
     localStorage.removeItem(VAULT_KEY);
   }
 
-  async function persist() {
-    if (!state.key) return;
-    const vault = readVault() || {};
-    const salt = vault.salt ? b64ToBuf(vault.salt) : crypto.getRandomValues(new Uint8Array(16));
-    const key = state.key;
-    const payload = await encryptPayload(key, { modules: state.modules, username: state.username });
-    writeVault({ v: 1, salt: bufToB64(salt), handle: state.username, ...payload });
+  function makeRecoveryKey() {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("").toUpperCase().match(/.{4}/g).join("-");
+  }
+
+  function normRecovery(s) {
+    return String(s || "").replace(/[^a-fA-F0-9]/g, "").toUpperCase();
   }
 
   function normHandle(s) {
     return String(s || "").trim().toLowerCase();
   }
 
-  async function unlockWith(user, pass) {
-    const vault = readVault();
-    if (!vault) throw new Error("NO VAULT");
-    const key = await deriveKey(pass, b64ToBuf(vault.salt));
-    const data = await decryptPayload(key, vault);
-    const stored = data.username || vault.handle || "";
-    if (stored && normHandle(user) !== normHandle(stored)) throw new Error("HANDLE");
-    state.key = key;
-    state.username = stored || String(user || "").trim();
+  async function importMaster(raw) {
+    return crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, true, ["encrypt", "decrypt"]);
+  }
+
+  async function wrapMaster(secret, raw) {
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const key = await deriveKey(secret, salt);
+    const blob = await encryptBytes(key, raw);
+    return { salt: bufToB64(salt), ...blob };
+  }
+
+  async function unwrapMaster(secret, wrap) {
+    const key = await deriveKey(secret, b64ToBuf(wrap.salt));
+    return decryptBytes(key, wrap);
+  }
+
+  async function persist() {
+    if (!state.master || !state.wrap) return;
+    const payload = await encryptPayload(state.master, { modules: state.modules, username: state.username });
+    writeVault({
+      v: 2,
+      handle: state.username,
+      wrap: state.wrap,
+      recovery: state.recoveryWrap || null,
+      payload
+    });
+  }
+
+  async function sessionFromRaw(raw, wrap, recoveryWrap, data) {
+    state.master = await importMaster(raw);
+    state.wrap = wrap;
+    state.recoveryWrap = recoveryWrap || null;
+    state.username = data.username || "";
     state.modules = Array.isArray(data.modules) ? data.modules : [];
-    if (!stored && state.username) await persist();
   }
 
   async function createVault(user, pass) {
-    const salt = crypto.getRandomValues(new Uint8Array(16));
-    const key = await deriveKey(pass, salt);
-    state.key = key;
+    const master = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
+    const raw = new Uint8Array(await crypto.subtle.exportKey("raw", master));
+    const recovery = makeRecoveryKey();
+    state.master = master;
     state.username = String(user || "").trim();
     state.modules = [];
-    const payload = await encryptPayload(key, { modules: [], username: state.username });
-    writeVault({ v: 1, salt: bufToB64(salt), handle: state.username, ...payload });
+    state.wrap = await wrapMaster(pass, raw);
+    state.recoveryWrap = await wrapMaster(normRecovery(recovery), raw);
+    await persist();
+    raw.fill(0);
+    return recovery;
+  }
+
+  async function unlockWith(user, pass) {
+    const vault = readVault();
+    if (!vault) throw new Error("NO VAULT");
+    if (vault.v === 2 && vault.wrap && vault.payload) {
+      const raw = new Uint8Array(await unwrapMaster(pass, vault.wrap));
+      const master = await importMaster(raw);
+      const data = await decryptPayload(master, vault.payload);
+      const stored = data.username || vault.handle || "";
+      if (stored && normHandle(user) !== normHandle(stored)) {
+        raw.fill(0);
+        throw new Error("AUTH");
+      }
+      await sessionFromRaw(raw, vault.wrap, vault.recovery, { ...data, username: stored || String(user || "").trim() });
+      raw.fill(0);
+      if (!stored && state.username) await persist();
+      if (!vault.recovery) return await issueRecovery();
+      return null;
+    }
+    if (!vault.salt || !vault.data) throw new Error("AUTH");
+    const oldKey = await deriveKey(pass, b64ToBuf(vault.salt), 120000);
+    const data = await decryptPayload(oldKey, vault);
+    const stored = data.username || vault.handle || "";
+    if (stored && normHandle(user) !== normHandle(stored)) throw new Error("AUTH");
+    const master = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
+    const raw = new Uint8Array(await crypto.subtle.exportKey("raw", master));
+    const recovery = makeRecoveryKey();
+    state.master = master;
+    state.username = stored || String(user || "").trim();
+    state.modules = Array.isArray(data.modules) ? data.modules : [];
+    state.wrap = await wrapMaster(pass, raw);
+    state.recoveryWrap = await wrapMaster(normRecovery(recovery), raw);
+    await persist();
+    raw.fill(0);
+    return recovery;
+  }
+
+  async function restoreWith(user, recoveryKey, newPass) {
+    const vault = readVault();
+    if (!vault || !vault.recovery || !vault.payload) throw new Error("AUTH");
+    const stored = vault.handle || "";
+    if (stored && normHandle(user) !== normHandle(stored)) throw new Error("AUTH");
+    const raw = new Uint8Array(await unwrapMaster(normRecovery(recoveryKey), vault.recovery));
+    const master = await importMaster(raw);
+    const data = await decryptPayload(master, vault.payload);
+    state.master = master;
+    state.username = data.username || stored || String(user || "").trim();
+    state.modules = Array.isArray(data.modules) ? data.modules : [];
+    state.wrap = await wrapMaster(newPass, raw);
+    state.recoveryWrap = vault.recovery;
+    await persist();
+    raw.fill(0);
+  }
+
+  async function issueRecovery() {
+    if (!state.master) throw new Error("AUTH");
+    const raw = new Uint8Array(await crypto.subtle.exportKey("raw", state.master));
+    const recovery = makeRecoveryKey();
+    state.recoveryWrap = await wrapMaster(normRecovery(recovery), raw);
+    await persist();
+    raw.fill(0);
+    return recovery;
+  }
+
+  async function rewrapPassword(newPass) {
+    if (!state.master) throw new Error("AUTH");
+    const raw = new Uint8Array(await crypto.subtle.exportKey("raw", state.master));
+    state.wrap = await wrapMaster(newPass, raw);
+    await persist();
+    raw.fill(0);
   }
 
   /* ── helpers ────────────────────────────────────────────── */
@@ -146,10 +257,17 @@
   }
 
   function normalizeUrl(raw) {
-    const t = raw.trim();
+    const t = String(raw || "").trim();
     if (!t) return "";
-    if (/^[a-z][a-z0-9+.-]*:/i.test(t)) return t;
-    return "https://" + t;
+    const candidate = /^[a-z][a-z0-9+.-]*:/i.test(t) ? t : "https://" + t;
+    let parsed;
+    try {
+      parsed = new URL(candidate);
+    } catch {
+      return "";
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "";
+    return parsed.href;
   }
 
   function callsignFromUrl(url) {
@@ -298,7 +416,7 @@
       return;
     }
     $("mod-kicker").textContent = m.pinned ? "*| PINNED" : "*| MODULE";
-    $("mod-title").innerHTML = esc(m.callsign);
+    $("mod-title").textContent = m.callsign;
     $("mod-host").textContent = m.url;
     $("mod-serial").textContent = m.serial;
     $("mod-ch").textContent = (m.channel || "OPEN").toUpperCase();
@@ -347,7 +465,7 @@
 
   function confirmDialog({ kicker, title, copy, ok, abort = "ABORT", danger = true }) {
     $("dialog-kicker").textContent = kicker;
-    $("dialog-title").innerHTML = title;
+    $("dialog-title").textContent = title;
     $("dialog-copy").textContent = copy;
     $("dialog-ok").textContent = ok;
     $("dialog-abort").textContent = abort;
@@ -395,25 +513,28 @@
   }
 
   function afterBoot() {
-    const vault = readVault();
-    setupGate(Boolean(vault));
+    setupGate();
     showView("gate");
     $("gate-user").focus();
   }
 
-  function setupGate(hasVault) {
-    $("gate-kicker").textContent = hasVault ? "*| ENTER" : "*| FIRST KEY";
-    $("gate-title").textContent = hasVault ? "Enter orbit" : "Set access";
-    $("gate-lede").textContent = hasVault
-      ? "Username and password. Deck stays on this device."
-      : "Username and password never leave this device. There is no recovery uplink.";
-    $("gate-submit").textContent = hasVault ? "ENTER" : "COMMIT";
-    $("gate-confirm-wrap").hidden = hasVault;
-    $("gate-confirm").required = !hasVault;
+  function setupGate() {
+    $("gate-kicker").textContent = "*| LOGIN";
+    $("gate-title").textContent = "Orbit";
     $("gate-error").textContent = "";
-    $("gate-form").dataset.mode = hasVault ? "enter" : "setup";
+    $("restore-error").textContent = "";
+    $("gate-form").hidden = false;
+    $("restore-form").hidden = true;
+    $("restore-open").hidden = false;
     const vault = readVault();
     $("gate-user").value = vault && vault.handle ? vault.handle : "";
+    $("restore-user").value = $("gate-user").value;
+  }
+
+  function showRecovery(key) {
+    state.pendingRecovery = null;
+    $("recovery-key").textContent = key;
+    showView("recovery");
   }
 
   async function enterShell() {
@@ -428,7 +549,9 @@
   }
 
   function lock() {
-    state.key = null;
+    state.master = null;
+    state.wrap = null;
+    state.recoveryWrap = null;
     state.modules = [];
     state.query = "";
     state.channel = "ALL";
@@ -436,12 +559,29 @@
     $("scan").value = "";
     state.username = "";
     clearInterval(clockTimer);
-    setupGate(true);
+    setupGate();
     showView("gate");
     $("gate-key").value = "";
     $("gate-user").focus();
     history.replaceState(null, "", "#/");
     toast("LOCKED");
+  }
+
+  function lockedOut() {
+    const wait = failUntil - Date.now();
+    if (wait > 0) {
+      $("gate-error").textContent = "Wait " + Math.ceil(wait / 1000) + "s, then retry.";
+      return true;
+    }
+    return false;
+  }
+
+  function noteFail() {
+    failCount += 1;
+    if (failCount >= FAIL_MAX) {
+      failUntil = Date.now() + FAIL_MS;
+      failCount = 0;
+    }
   }
 
   /* ── install ────────────────────────────────────────────── */
@@ -457,37 +597,95 @@
 
   $("gate-form").addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (lockedOut()) return;
     const user = $("gate-user").value.trim();
     const pass = $("gate-key").value;
-    const mode = $("gate-form").dataset.mode;
     $("gate-error").textContent = "";
+    $("gate-submit").disabled = true;
     if (!user) {
       $("gate-error").textContent = "Username required.";
+      $("gate-submit").disabled = false;
       return;
     }
     if (pass.length < 4) {
       $("gate-error").textContent = "Password too short — four characters minimum.";
+      $("gate-submit").disabled = false;
       return;
     }
     try {
-      if (mode === "setup") {
-        const confirm = $("gate-confirm").value;
-        if (pass !== confirm) {
-          $("gate-error").textContent = "Passwords do not match.";
-          return;
-        }
-        await createVault(user, pass);
-        toast("IDENTITY COMMITTED");
-      } else {
-        await unlockWith(user, pass);
-        toast("LINK ESTABLISHED");
-      }
+      const vault = readVault();
+      const recovery = vault ? await unlockWith(user, pass) : await createVault(user, pass);
+      failCount = 0;
       $("gate-key").value = "";
-      $("gate-confirm").value = "";
-      await enterShell();
-    } catch (err) {
-      $("gate-error").textContent = err && err.message === "HANDLE" ? "Username rejected." : "Password rejected.";
+      if (recovery) showRecovery(recovery);
+      else await enterShell();
+    } catch {
+      noteFail();
+      $("gate-error").textContent = "Login rejected.";
+    } finally {
+      $("gate-submit").disabled = false;
     }
+  });
+
+  $("restore-open").addEventListener("click", () => {
+    $("gate-form").hidden = true;
+    $("restore-form").hidden = false;
+    $("restore-open").hidden = true;
+    $("restore-user").value = $("gate-user").value;
+    $("restore-key").focus();
+  });
+
+  $("restore-abort").addEventListener("click", () => {
+    $("restore-form").hidden = true;
+    $("gate-form").hidden = false;
+    $("restore-open").hidden = false;
+    $("restore-key").value = "";
+    $("restore-pass").value = "";
+    $("restore-error").textContent = "";
+  });
+
+  $("restore-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (lockedOut()) {
+      $("restore-error").textContent = $("gate-error").textContent;
+      return;
+    }
+    const user = $("restore-user").value.trim();
+    const rec = $("restore-key").value;
+    const pass = $("restore-pass").value;
+    $("restore-error").textContent = "";
+    if (!user || normRecovery(rec).length !== 32 || pass.length < 4) {
+      $("restore-error").textContent = "Username, restore key, and new password required.";
+      return;
+    }
+    try {
+      await restoreWith(user, rec, pass);
+      failCount = 0;
+      $("restore-key").value = "";
+      $("restore-pass").value = "";
+      toast("PASSWORD RESTORED");
+      await enterShell();
+    } catch {
+      noteFail();
+      $("restore-error").textContent = "Restore rejected.";
+    }
+  });
+
+  $("recovery-copy").addEventListener("click", async () => {
+    const key = $("recovery-key").textContent;
+    try {
+      await navigator.clipboard.writeText(key);
+      toast("KEY COPIED");
+    } catch {
+      toast("COPY FAILED");
+    }
+  });
+
+  $("recovery-done").addEventListener("click", () => enterShell());
+
+  $("recovery-issue").addEventListener("click", async () => {
+    const key = await issueRecovery();
+    showRecovery(key);
   });
 
   document.addEventListener("click", async (e) => {
@@ -643,19 +841,16 @@
         $("id-error").textContent = "Passwords do not match.";
         return;
       }
-      const salt = crypto.getRandomValues(new Uint8Array(16));
-      const key = await deriveKey(a, salt);
-      state.key = key;
+      await rewrapPassword(a);
       state.username = user;
-      const payload = await encryptPayload(key, { modules: state.modules, username: state.username });
-      writeVault({ v: 1, salt: bufToB64(salt), handle: state.username, ...payload });
+      await persist();
       $("id-pass").value = "";
       $("id-confirm").value = "";
-      toast("IDENTITY COMMITTED");
+      toast("PASSWORD UPDATED");
     } else {
       state.username = user;
       await persist();
-      toast("USERNAME COMMITTED");
+      toast("USERNAME UPDATED");
     }
     renderDeck();
   });
@@ -727,11 +922,13 @@
     });
     if (!ok) return;
     clearVault();
-    state.key = null;
+    state.master = null;
+    state.wrap = null;
+    state.recoveryWrap = null;
     state.username = "";
     state.modules = [];
     toast("DECK WIPED");
-    setupGate(false);
+    setupGate();
     showView("gate");
     $("gate-user").focus();
   });

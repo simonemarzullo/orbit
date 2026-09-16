@@ -432,6 +432,30 @@ svg {
   white-space: pre-wrap;
 }
 
+#view-recovery {
+  flex-direction: column;
+  padding:
+    calc(20px + var(--safe-t))
+    calc(var(--gutter) + var(--safe-r))
+    calc(28px + var(--safe-b))
+    calc(var(--gutter) + var(--safe-l));
+}
+
+.recovery-key {
+  margin: 0;
+  font-family: var(--font-m);
+  font-size: clamp(15px, 3.6vw, 20px);
+  letter-spacing: 0.14em;
+  line-height: 1.5;
+  color: var(--type);
+  user-select: text;
+  word-break: break-word;
+  padding: 18px 16px;
+  border: 1.5px solid var(--accent);
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.4);
+}
+
 .boot-log .cursor {
   display: inline-block;
   width: 0.6em;

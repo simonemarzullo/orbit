@@ -10,7 +10,9 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="ORBIT">
   <meta name="application-name" content="ORBIT">
-  <meta name="description" content="ORBIT — private link dashboard. Local only. No uplink.">
+  <meta name="description" content="ORBIT — private link dashboard.">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'; frame-ancestors 'none'">
+  <meta name="referrer" content="no-referrer">
   <title>ORBIT</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
@@ -35,9 +37,9 @@
       <pre class="boot-log" id="boot-log">> <span class="cursor">_</span></pre>
     </section>
 
-    <section id="view-gate" class="view" aria-label="Access">
+    <section id="view-gate" class="view" aria-label="ORBIT">
       <div class="gate-top">
-        <span class="kicker">*| ACCESS</span>
+        <span class="kicker">*| ORBIT</span>
         <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
           <circle cx="16" cy="16" r="11" stroke="currentColor" stroke-width="1.15"/>
           <circle cx="16" cy="16" r="1.15" fill="currentColor"/>
@@ -46,9 +48,8 @@
       </div>
       <div class="gate-body">
         <div>
-          <p class="kicker" id="gate-kicker">*| FIRST KEY</p>
-          <h1 class="headline" id="gate-title">Set access</h1>
-          <p class="lede" id="gate-lede">Your key never leaves this device. There is no recovery uplink.</p>
+          <p class="kicker" id="gate-kicker">*| LOGIN</p>
+          <h1 class="headline" id="gate-title">Orbit</h1>
         </div>
         <form class="gate-form" id="gate-form" autocomplete="off">
           <label class="field">
@@ -57,19 +58,48 @@
           </label>
           <label class="field">
             <span class="kicker">// PASSWORD</span>
-            <input id="gate-key" type="password" name="key" required minlength="4" maxlength="128" autocomplete="current-password" enterkeyhint="done">
-          </label>
-          <label class="field" id="gate-confirm-wrap">
-            <span class="kicker">// CONFIRM</span>
-            <input id="gate-confirm" type="password" name="confirm" minlength="4" maxlength="128" autocomplete="new-password">
+            <input id="gate-key" type="password" name="password" required minlength="4" maxlength="128" autocomplete="current-password" enterkeyhint="go">
           </label>
           <p class="field-error" id="gate-error" role="alert"></p>
-          <button class="act primary block" type="submit" id="gate-submit">COMMIT</button>
+          <button class="act primary block" type="submit" id="gate-submit">ACCESS</button>
+        </form>
+        <form class="gate-form" id="restore-form" hidden>
+          <label class="field">
+            <span class="kicker">// USERNAME</span>
+            <input id="restore-user" type="text" maxlength="32" autocomplete="username" autocapitalize="off" spellcheck="false">
+          </label>
+          <label class="field">
+            <span class="kicker">// RESTORE KEY</span>
+            <input id="restore-key" type="text" maxlength="80" autocomplete="off" autocapitalize="characters" spellcheck="false">
+          </label>
+          <label class="field">
+            <span class="kicker">// NEW PASSWORD</span>
+            <input id="restore-pass" type="password" minlength="4" maxlength="128" autocomplete="new-password">
+          </label>
+          <p class="field-error" id="restore-error" role="alert"></p>
+          <button class="act primary block" type="submit">RESTORE</button>
+          <button class="act ghost block" type="button" id="restore-abort">ABORT</button>
         </form>
       </div>
       <div class="gate-foot">
-        <span>// LOCAL ONLY</span>
-        <span>*| NO UPLINK</span>
+        <button class="kicker linkish" type="button" id="restore-open">Restore access</button>
+      </div>
+    </section>
+
+    <section id="view-recovery" class="view" aria-label="Restore key">
+      <div class="gate-top">
+        <span class="kicker">*| RESTORE KEY</span>
+      </div>
+      <div class="gate-body">
+        <div>
+          <h1 class="headline">Save this key</h1>
+          <p class="lede">Use it to restore your password. It is shown once.</p>
+        </div>
+        <p class="recovery-key" id="recovery-key"></p>
+        <div class="form-actions">
+          <button class="act ghost" type="button" id="recovery-copy">COPY</button>
+          <button class="act primary" type="button" id="recovery-done">ACCESS</button>
+        </div>
       </div>
     </section>
 
@@ -235,7 +265,7 @@
                 <div class="rivet tl"></div><div class="rivet br"></div>
                 <p class="kicker">// IDENTITY</p>
                 <h2>Username & password</h2>
-                <p>Change the handle and key for this device. Leave password blank to keep the current key.</p>
+                <p>Change the username or set a new password. Leave password blank to keep the current one.</p>
                 <form class="form-stack" id="id-form">
                   <label class="field">
                     <span class="kicker">// USERNAME</span>
@@ -252,6 +282,14 @@
                   <p class="field-error" id="id-error" role="alert"></p>
                   <button class="act primary" type="submit">COMMIT</button>
                 </form>
+              </article>
+
+              <article class="plate sys-plate">
+                <div class="rivet tl"></div><div class="rivet br"></div>
+                <p class="kicker">// RESTORE</p>
+                <h2>Restore key</h2>
+                <p>Issues a new key that can reset your password. The previous restore key stops working.</p>
+                <button class="act" type="button" id="recovery-issue">ISSUE NEW KEY</button>
               </article>
 
               <article class="plate sys-plate">
