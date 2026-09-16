@@ -34,23 +34,27 @@
   box-sizing: border-box;
 }
 
-html,
-body {
+html {
   margin: 0;
-  min-height: 100%;
+  height: auto;
+  overflow-x: hidden;
+  overflow-y: scroll;
   background: var(--void);
-  color: var(--type);
-  font-family: var(--font-d);
-  font-size: 16px;
-  line-height: 1.45;
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
 }
 
 body {
+  margin: 0;
   min-height: 100dvh;
-  overflow: hidden;
-  overscroll-behavior: none;
+  min-height: 100svh;
+  overflow-x: hidden;
+  overflow-y: visible;
+  background: var(--void);
+  color: var(--type);
+  font-family: var(--font-d);
+  font-size: 16px;
+  line-height: 1.45;
   user-select: none;
 }
 
@@ -187,6 +191,7 @@ svg {
   z-index: 1;
   min-height: 100dvh;
   min-height: 100svh;
+  height: auto;
 }
 
 /* Type */
@@ -406,10 +411,14 @@ svg {
 .view {
   display: none;
   min-height: 100dvh;
+  min-height: 100svh;
+  height: auto;
 }
 
 .view.is-on {
   display: flex;
+  flex-direction: column;
+  overflow: visible;
 }
 
 /* Boot */
@@ -434,6 +443,8 @@ svg {
 
 #view-recovery {
   flex-direction: column;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   padding:
     calc(20px + var(--safe-t))
     calc(var(--gutter) + var(--safe-r))
@@ -469,6 +480,8 @@ svg {
 /* Gate */
 #view-gate {
   flex-direction: column;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   padding:
     calc(20px + var(--safe-t))
     calc(var(--gutter) + var(--safe-r))
@@ -523,11 +536,12 @@ svg {
 }
 
 .shell {
-  flex: 1;
+  flex: 1 0 auto;
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto auto;
   min-height: 100dvh;
   min-height: 100svh;
+  height: auto;
 }
 
 .rail {
@@ -622,7 +636,10 @@ svg {
     8px
     calc(var(--gutter) + var(--safe-l));
   border-bottom: 1px solid rgba(238, 58, 23, 0.22);
-  background: rgba(11, 11, 11, 0.72);
+  background: rgba(11, 11, 11, 0.92);
+  position: sticky;
+  top: 0;
+  z-index: 16;
 }
 
 .brand-inline {
@@ -651,8 +668,8 @@ svg {
 }
 
 .stage {
-  overflow: auto;
-  -webkit-overflow-scrolling: touch;
+  overflow: visible;
+  min-width: 0;
   padding:
     22px
     calc(var(--gutter) + var(--safe-r))
@@ -932,6 +949,8 @@ svg {
   right: 0;
   bottom: 0;
   z-index: 20;
+  -webkit-transform: translateZ(0);
+  transform: translateZ(0);
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   min-height: calc(var(--dock-h) + var(--safe-b));
@@ -1048,13 +1067,20 @@ svg {
 
 @media (min-width: 768px) {
   .shell {
-    grid-template-columns: var(--rail-w) 1fr;
-    grid-template-rows: auto 1fr;
+    grid-template-columns: var(--rail-w) minmax(0, 1fr);
+    grid-template-rows: auto auto;
   }
 
   .rail {
     display: flex;
     grid-row: 1 / -1;
+    position: sticky;
+    top: 0;
+    align-self: start;
+    height: 100dvh;
+    max-height: 100svh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   .brand-inline {

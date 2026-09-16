@@ -327,6 +327,7 @@
     const hash = panel === "module" && state.activeId ? `#/module/${state.activeId}` : `#/${panel}`;
     if (location.hash !== hash) history.replaceState(null, "", hash);
     $("stage").scrollTop = 0;
+    window.scrollTo(0, 0);
     if (panel === "module") renderModule();
     if (panel === "deck") renderDeck();
     if (panel === "new") $("mod-callsign").focus();
