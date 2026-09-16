@@ -62,6 +62,7 @@
           </label>
           <p class="field-error" id="gate-error" role="alert"></p>
           <button class="act primary block" type="submit" id="gate-submit">ACCESS</button>
+          <button class="act ghost block" type="button" id="restore-open">Forgot password</button>
         </form>
         <form class="gate-form" id="restore-form" hidden>
           <label class="field">
@@ -81,9 +82,7 @@
           <button class="act ghost block" type="button" id="restore-abort">ABORT</button>
         </form>
       </div>
-      <div class="gate-foot">
-        <button class="kicker linkish" type="button" id="restore-open">Restore access</button>
-      </div>
+      <div class="gate-foot" id="gate-foot" hidden></div>
     </section>
 
     <section id="view-recovery" class="view" aria-label="Restore key">

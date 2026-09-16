@@ -174,6 +174,10 @@ svg {
   outline-offset: 3px;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 .sr {
   position: absolute;
   width: 1px;

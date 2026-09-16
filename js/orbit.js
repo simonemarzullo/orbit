@@ -526,7 +526,6 @@
     $("restore-error").textContent = "";
     $("gate-form").hidden = false;
     $("restore-form").hidden = true;
-    $("restore-open").hidden = false;
     const vault = readVault();
     $("gate-user").value = vault && vault.handle ? vault.handle : "";
     $("restore-user").value = $("gate-user").value;
@@ -631,15 +630,15 @@
   $("restore-open").addEventListener("click", () => {
     $("gate-form").hidden = true;
     $("restore-form").hidden = false;
-    $("restore-open").hidden = true;
     $("restore-user").value = $("gate-user").value;
+    $("gate-kicker").textContent = "*| RESTORE";
     $("restore-key").focus();
   });
 
   $("restore-abort").addEventListener("click", () => {
     $("restore-form").hidden = true;
     $("gate-form").hidden = false;
-    $("restore-open").hidden = false;
+    $("gate-kicker").textContent = "*| LOGIN";
     $("restore-key").value = "";
     $("restore-pass").value = "";
     $("restore-error").textContent = "";
